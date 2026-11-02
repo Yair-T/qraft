@@ -90,6 +90,7 @@ _LOGO_TOGGLE = st.components.v2.component(
     css='''
       .logo-toggle { display:flex; align-items:center; justify-content:flex-start; gap:8px; min-height:32px; direction:rtl; cursor:pointer; color:#17213b; font:inherit; }
       .toggle-text { line-height:1.4; }
+      @media (prefers-color-scheme:dark) { .logo-toggle { color:#e7eaf2; } }
       .toggle-track { position:relative; display:block; flex:0 0 32px; width:32px; height:18px; border-radius:999px; background:#c7cad3; transition:background-color 150ms ease; }
       .toggle-track[data-checked="true"] { background:#f04b57; }
       .toggle-track input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
@@ -111,6 +112,28 @@ _LOGO_TOGGLE = st.components.v2.component(
         track.dataset.checked = String(input.checked);
         setStateValue("value", input.checked);
       };
+    }''',
+)
+
+
+_HISTORY_STORE = st.components.v2.component(
+    "qraft_history_store",
+    html="<div></div>",
+    css="div{display:none}",
+    js='''export default function(component) {
+      const { data, setStateValue } = component;
+      const storageKey = "qraft.history.v1";
+      if (data.history === null) {
+        let saved = [];
+        try { saved = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch {}
+        setStateValue("value", saved);
+        return;
+      }
+      try { localStorage.setItem(storageKey, JSON.stringify(data.history)); } catch {}
+      // Keep the component state in sync with the data Python has just sent.
+      // This also gives Python a positive acknowledgement after the first
+      // localStorage hydration pass instead of leaving the initial [] value.
+      setStateValue("value", data.history);
     }''',
 )
 
@@ -149,28 +172,78 @@ def logo_toggle(label: str, key: str) -> None:
 
 def init_state() -> None:
     defaults = {"kind": CONTENT_TYPES[0], "size": 400, "fg": "#14213D", "bg": "#FFFFFF",
-                "ec": "M — בינוני", "border": 4, "round_logo": True, "history": []}
+                "ec": "M — בינוני", "border": 4, "round_logo": True, "history": [],
+                "active_history_signature": None, "suppressed_history_signature": None}
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    if "history_loaded" not in st.session_state:
+        st.session_state.history_loaded = False
+
+
+def persist_history() -> None:
+    component_key = "qraft_history_store"
+    saved = st.session_state.get(component_key, {}).get("value")
+    if saved is not None:
+        # On the first page render the component may report its stored value
+        # after the user has already created a QR. Never let a stale/empty
+        # hydration response replace that newer in-session history.
+        if saved and not st.session_state.history:
+            st.session_state.history = [
+                {**item, "image": base64.b64decode(item["image"])}
+                for item in saved
+            ][:5]
+        st.session_state.history_loaded = True
+
+
+def history_for_storage() -> list[dict]:
+    return [
+        {**item, "image": base64.b64encode(item["image"]).decode("ascii")}
+        for item in st.session_state.history[:5]
+    ]
+
+
+def delete_history_item(index: int) -> None:
+    if 0 <= index < len(st.session_state.history):
+        removed = st.session_state.history.pop(index)
+        if removed["signature"] == st.session_state.active_history_signature:
+            st.session_state.suppressed_history_signature = removed["signature"]
+
+
+def clear_history() -> None:
+    st.session_state.history = []
+    st.session_state.suppressed_history_signature = st.session_state.active_history_signature
 
 
 def rtl() -> None:
     st.markdown("""<style>
-    :root{--ink:#17213b;--muted:#707789;--blue:#4d56df;--line:#e8eaf1;}
-    html,body,[data-testid="stAppViewContainer"]{direction:rtl!important;background:#fafbfe;color:var(--ink);}
+    :root{color-scheme:light dark;--ink:#17213b;--muted:#707789;--blue:#4d56df;--line:#e8eaf1;--page:#fafbfe;--surface:#fff;--control:#fff;--control-ink:#28314a;--soft:#f5f6ff;--shadow:#17213b08;}
+    @media(prefers-color-scheme:dark){:root{--ink:#e7eaf2;--muted:#a9b0c2;--blue:#9ba4ff;--line:#343a4b;--page:#11131a;--surface:#1b1e28;--control:#252936;--control-ink:#eef0f6;--soft:#2b3040;--shadow:#0005;}}
+    html,body,[data-testid="stAppViewContainer"]{direction:rtl!important;background:var(--page)!important;color:var(--ink)!important;}
     [data-testid="stSidebar"]{display:none!important}
     .block-container{max-width:780px!important;padding:30px 24px 64px!important;margin:0 auto!important;}
     [data-testid="stMainBlockContainer"]{direction:rtl;text-align:center}
-    .brand{display:flex;justify-content:center;align-items:center;gap:14px;margin:8px auto 4px;color:#101b3c;font-size:48px;font-weight:800;letter-spacing:-1.6px}
-    .brand-icon{font-size:42px;color:#4d56df}.tagline{color:#73798a;font-size:17px;text-align:center;margin-bottom:30px}
-    .hero{text-align:center;margin:20px 0 24px}.hero h1{font-size:30px;color:#121d3b;margin-bottom:8px}.muted{color:var(--muted)}
-    .section-title{text-align:right;font-weight:750;font-size:19px;margin:0 0 12px;color:#17213b}
-    div[data-testid="stVerticalBlockBorderWrapper"]{background:white;border:1px solid var(--line);border-radius:16px;padding:18px 22px;box-shadow:0 5px 22px #17213b08;margin:12px auto 18px}
+    .brand{display:flex;justify-content:center;align-items:center;gap:14px;margin:8px auto 4px;color:var(--ink);font-size:48px;font-weight:800;letter-spacing:-1.6px}
+    .brand-icon{font-size:42px;color:var(--blue)}.tagline{color:var(--muted);font-size:17px;text-align:center;margin-bottom:30px}
+    .hero{text-align:center;margin:20px 0 24px}.hero h1{font-size:30px;color:var(--ink);margin-bottom:8px}.muted{color:var(--muted)}
+    .section-title{text-align:right;font-weight:750;font-size:19px;margin:0 0 12px;color:var(--ink)}
+    div[data-testid="stVerticalBlockBorderWrapper"]{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 22px;box-shadow:0 5px 22px var(--shadow);margin:12px auto 18px}
     div[data-testid="stHorizontalBlock"]{justify-content:center;gap:10px}
-    [data-testid="stButton"] button{border-radius:12px;border:1px solid #e4e7ef;background:#fff;color:#28314a;font-weight:600;min-height:56px;white-space:normal;line-height:1.15;padding:8px 6px;transition:.16s}
-    [data-testid="stButton"] button:hover{border-color:#5864ec;color:#4652d8;background:#f5f6ff}
-    [data-testid="stDownloadButton"] button{width:100%;border-radius:11px;background:#fff;border:1px solid #5964e8;color:#4652d8;font-weight:700;min-height:48px}
+    [data-testid="stButton"] button{border-radius:12px;border:1px solid var(--line);background:var(--control);color:var(--control-ink);font-weight:600;min-height:56px;white-space:normal;line-height:1.15;padding:8px 6px;transition:.16s}
+    [data-testid="stButton"] button:hover{border-color:var(--blue);color:var(--blue);background:var(--soft)}
+    [data-testid="stDownloadButton"] button{width:100%;border-radius:11px;background:var(--control);border:1px solid var(--blue);color:var(--blue);font-weight:700;min-height:48px}
+    [data-testid="stAlert"]{background:var(--surface)!important;color:var(--ink)!important;border:1px solid var(--line)!important}
+    [data-testid="stAlert"] *{color:inherit!important}
+    .st-key-history_gallery [data-testid="stHorizontalBlock"]{display:flex!important;flex-wrap:nowrap!important;justify-content:flex-start!important;direction:rtl!important;gap:4px!important;overflow-x:auto;overflow-y:hidden;padding:4px 2px 12px;scrollbar-width:thin;}
+    .st-key-history_gallery [data-testid="stHorizontalBlock"]>div[data-testid="stColumn"]{flex:0 0 84px!important;min-width:84px!important;max-width:84px!important;padding:0!important;box-sizing:border-box!important;}
+    .st-key-history_gallery [data-testid="stImage"] img{width:80px!important;max-width:80px;margin:auto;}
+    .st-key-history_gallery [data-testid="stDownloadButton"] button{width:80px!important;min-height:36px;margin:0 auto;display:block;}
+    .st-key-clear_history{transform:translateY(8px)!important;}
+    .st-key-clear_history button{min-height:36px!important;padding:4px 8px!important;font-size:13px!important;white-space:nowrap!important;}
+    .st-key-history_header [data-testid="stHorizontalBlock"]{display:flex!important;flex-wrap:nowrap!important;direction:rtl!important;justify-content:flex-start!important;align-items:center!important;gap:8px!important;}
+    .st-key-history_header [data-testid="stColumn"]{flex:0 0 max-content!important;width:max-content!important;min-width:max-content!important;max-width:max-content!important;}
+    .history-title{text-align:right!important;margin:0!important;padding:0!important;line-height:1.2!important;}
+    .st-key-history_gallery [data-testid="stButton"] button{width:80px;min-height:32px;padding:4px!important;margin:4px auto 0;display:block;font-size:13px;}
     [data-testid="stImage"]{text-align:center}[data-testid="stImage"] img{max-height:340px;object-fit:contain;background:white;border-radius:12px}
     [data-testid="stWidgetLabel"]{text-align:right}
     input,textarea,[data-baseweb="select"]{direction:rtl;text-align:right}
@@ -398,7 +471,11 @@ with st.container(border=True):
             svg=svg_bytes(qr_obj,st.session_state.fg,st.session_state.bg,logo)
             pdf=pdf_bytes(qr_image)
             history_signature=(payload,st.session_state.kind,st.session_state.size,st.session_state.fg,st.session_state.bg,st.session_state.ec,st.session_state.border,upload.name if upload else None)
-            if not st.session_state.history or st.session_state.history[0]["signature"]!=history_signature:
+            if st.session_state.active_history_signature != history_signature:
+                st.session_state.suppressed_history_signature = None
+            st.session_state.active_history_signature = history_signature
+            if (st.session_state.suppressed_history_signature != history_signature
+                    and (not st.session_state.history or st.session_state.history[0]["signature"] != history_signature)):
                 st.session_state.history.insert(0,{"signature":history_signature,"kind":st.session_state.kind,"image":png.getvalue(),"created":datetime.now().strftime("%H:%M")}); st.session_state.history=st.session_state.history[:5]
             d1,d2,d3=st.columns(3,wrap=False)
             d1.download_button("↓　PNG",png.getvalue(),"qr-code.png","image/png",use_container_width=True)
@@ -407,7 +484,37 @@ with st.container(border=True):
         except (qrcode.exceptions.DataOverflowError,ValueError) as exc:
             st.error(f"לא ניתן ליצור QR מהתוכן הזה. נסו לקצר אותו. ({exc})")
 if st.session_state.history:
-    st.caption("הקודים האחרונים שנוצרו")
-    hcols=st.columns(min(5,len(st.session_state.history)))
-    for col,item in zip(hcols,st.session_state.history):
-        with col: st.image(item["image"],use_container_width=True); st.caption(item["kind"])
+    with st.container(key="history_header"):
+        history_title_col, history_clear_col = st.columns([5, 1], vertical_alignment="center")
+        with history_title_col:
+            st.markdown('<div class="section-title history-title">הקודים האחרונים שנוצרו</div>', unsafe_allow_html=True)
+        with history_clear_col:
+            st.button("מחק הכל", key="clear_history", icon=":material/delete_sweep:", on_click=clear_history)
+    with st.container(key="history_gallery"):
+        hcols=st.columns(len(st.session_state.history),gap="small",vertical_alignment="top")
+        for index,(col,item) in enumerate(zip(hcols,st.session_state.history),start=1):
+            with col:
+                st.image(item["image"],width=80)
+                st.download_button(
+                    "↓ PNG",
+                    item["image"],
+                    file_name=f"qr-history-{index}.png",
+                    mime="image/png",
+                    key=f"history_png_{index}",
+                    use_container_width=False,
+                )
+                st.button(
+                    "מחק",
+                    key=f"history_delete_{index}",
+                    icon=":material/delete:",
+                    help="מחיקת הקוד מההיסטוריה",
+                    on_click=delete_history_item,
+                    args=(index - 1,),
+                )
+
+_HISTORY_STORE(
+    key="qraft_history_store",
+    data={"history": history_for_storage() if st.session_state.history_loaded else None},
+    default={"value": None},
+    on_value_change=persist_history,
+)
