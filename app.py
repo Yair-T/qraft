@@ -22,6 +22,129 @@ st.set_page_config(page_title="מחולל קודי QR", page_icon="▦", layout=
 ERROR_LEVELS = {"L — נמוך": ERROR_CORRECT_L, "M — בינוני": ERROR_CORRECT_M,
                 "Q — גבוה": ERROR_CORRECT_Q, "H — הגבוה ביותר": ERROR_CORRECT_H}
 CONTENT_TYPES = ["קישור", "טקסט", "דואר אלקטרוני", "שיחת טלפון", "SMS", "WhatsApp", "רשת Wi-Fi", "כרטיס ביקור (vCard)", "אירוע", "רשת חברתית", "PDF", "תמונה / וידאו"]
+TYPE_BUTTONS = {
+    "קישור": ("קישור", ":material/link:"),
+    "טקסט": ("טקסט", ":material/article:"),
+    "דואר אלקטרוני": ("דוא״ל", ":material/mail:"),
+    "שיחת טלפון": ("טלפון", ":material/call:"),
+    "SMS": ("SMS", ":material/sms:"),
+    "WhatsApp": ("WA", ":material/chat:"),
+    "רשת Wi-Fi": ("Wi-Fi", ":material/wifi:"),
+    "כרטיס ביקור (vCard)": ("vCard", ":material/badge:"),
+    "אירוע": ("אירוע", ":material/event:"),
+    "רשת חברתית": ("חברתי", ":material/groups:"),
+    "PDF": ("PDF", ":material/picture_as_pdf:"),
+    "תמונה / וידאו": ("מדיה", ":material/image:"),
+}
+TYPE_SELECT_ICONS = {
+    "קישור": "🔗", "טקסט": "✍️", "דואר אלקטרוני": "✉️", "שיחת טלפון": "📞",
+    "SMS": "💬", "WhatsApp": "🟢", "רשת Wi-Fi": "📶", "כרטיס ביקור (vCard)": "🪪",
+    "אירוע": "📅", "רשת חברתית": "👥", "PDF": "📄", "תמונה / וידאו": "🖼️",
+}
+
+_RANGE_SLIDER = st.components.v2.component(
+    "qraft_ltr_range_slider",
+    html='''<div class="range-control" dir="ltr">
+      <label></label>
+      <output class="range-value"></output>
+      <input type="range" />
+      <div class="range-limits"><span class="range-min"></span><span class="range-max"></span></div>
+    </div>''',
+    css='''
+      .range-control { direction:ltr; width:100%; }
+      .range-control label { display:block; direction:rtl; text-align:right; font-size:14px; font-weight:400; }
+      .range-control output { display:block; color:#f04b57; text-align:center; font-size:12px; min-height:18px; }
+      .range-control input { display:block; width:100%; margin:0; direction:ltr; accent-color:#f04b57; cursor:pointer; }
+      .range-limits { display:flex; justify-content:space-between; direction:ltr; color:#707789; font-size:12px; }
+    ''',
+    js='''export default function(component) {
+      const { parentElement, data, setStateValue } = component;
+      const root = parentElement.querySelector(".range-control");
+      if (!root) return;
+      const input = root.querySelector("input");
+      const label = root.querySelector("label");
+      const output = root.querySelector("output");
+      label.textContent = data.label;
+      input.id = `qraft-range-${data.id}`;
+      label.htmlFor = input.id;
+      input.min = String(data.min);
+      input.max = String(data.max);
+      input.step = String(data.step);
+      if (input.value !== String(data.value)) input.value = String(data.value);
+      root.querySelector(".range-min").textContent = data.min;
+      root.querySelector(".range-max").textContent = data.max;
+      const refresh = () => { output.textContent = input.value; };
+      refresh();
+      input.oninput = refresh;
+      input.onchange = () => setStateValue("value", Number(input.value));
+    }''',
+)
+
+
+_LOGO_TOGGLE = st.components.v2.component(
+    "qraft_logo_toggle",
+    html='''<label class="logo-toggle" dir="rtl">
+      <span class="toggle-track" dir="ltr"><input type="checkbox" role="switch" /><span class="toggle-thumb"></span></span>
+      <span class="toggle-text"></span>
+    </label>''',
+    css='''
+      .logo-toggle { display:flex; align-items:center; justify-content:flex-start; gap:8px; min-height:32px; direction:rtl; cursor:pointer; color:#17213b; font:inherit; }
+      .toggle-text { line-height:1.4; }
+      .toggle-track { position:relative; display:block; flex:0 0 32px; width:32px; height:18px; border-radius:999px; background:#c7cad3; transition:background-color 150ms ease; }
+      .toggle-track[data-checked="true"] { background:#f04b57; }
+      .toggle-track input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; }
+      .toggle-thumb { position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 2px #0002; pointer-events:none; transition:transform 150ms ease; }
+      .toggle-track[data-checked="true"] .toggle-thumb { transform:translateX(14px); }
+      .toggle-track:has(input:focus-visible) { outline:2px solid #5964e8; outline-offset:2px; }
+    ''',
+    js='''export default function(component) {
+      const { parentElement, data, setStateValue } = component;
+      const root = parentElement.querySelector(".logo-toggle");
+      if (!root) return;
+      const input = root.querySelector("input");
+      const track = root.querySelector(".toggle-track");
+      root.querySelector(".toggle-text").textContent = data.label;
+      if (input.checked !== Boolean(data.value)) input.checked = Boolean(data.value);
+      input.setAttribute("aria-label", data.label);
+      track.dataset.checked = String(input.checked);
+      input.onchange = () => {
+        track.dataset.checked = String(input.checked);
+        setStateValue("value", input.checked);
+      };
+    }''',
+)
+
+
+def range_slider(label: str, minimum: int, maximum: int, key: str, step: int = 1) -> None:
+    component_key = f"{key}_range_control"
+
+    def sync_value() -> None:
+        st.session_state[key] = st.session_state[component_key]["value"]
+
+    state = st.session_state.get(component_key, {})
+    value = state.get("value", st.session_state[key])
+    _RANGE_SLIDER(
+        key=component_key,
+        data={"id": key, "label": label, "min": minimum, "max": maximum, "step": step, "value": value},
+        default={"value": value},
+        on_value_change=sync_value,
+    )
+
+
+def logo_toggle(label: str, key: str) -> None:
+    component_key = f"{key}_toggle_control"
+
+    def sync_value() -> None:
+        st.session_state[key] = st.session_state[component_key]["value"]
+
+    state = st.session_state.get(component_key, {})
+    value = state.get("value", st.session_state[key])
+    _LOGO_TOGGLE(
+        key=component_key,
+        data={"label": label, "value": value},
+        default={"value": value},
+        on_value_change=sync_value,
+    )
 
 
 def init_state() -> None:
@@ -45,14 +168,25 @@ def rtl() -> None:
     .section-title{text-align:right;font-weight:750;font-size:19px;margin:0 0 12px;color:#17213b}
     div[data-testid="stVerticalBlockBorderWrapper"]{background:white;border:1px solid var(--line);border-radius:16px;padding:18px 22px;box-shadow:0 5px 22px #17213b08;margin:12px auto 18px}
     div[data-testid="stHorizontalBlock"]{justify-content:center;gap:10px}
-    [data-testid="stButton"] button{border-radius:12px;border:1px solid #e4e7ef;background:#fff;color:#28314a;font-weight:600;min-height:56px;transition:.16s}
+    [data-testid="stButton"] button{border-radius:12px;border:1px solid #e4e7ef;background:#fff;color:#28314a;font-weight:600;min-height:56px;white-space:normal;line-height:1.15;padding:8px 6px;transition:.16s}
     [data-testid="stButton"] button:hover{border-color:#5864ec;color:#4652d8;background:#f5f6ff}
     [data-testid="stDownloadButton"] button{width:100%;border-radius:11px;background:#fff;border:1px solid #5964e8;color:#4652d8;font-weight:700;min-height:48px}
     [data-testid="stImage"]{text-align:center}[data-testid="stImage"] img{max-height:340px;object-fit:contain;background:white;border-radius:12px}
     [data-testid="stWidgetLabel"]{text-align:right}
     input,textarea,[data-baseweb="select"]{direction:rtl;text-align:right}
+    [role="listbox"],[role="listbox"] [role="option"]{direction:rtl!important;text-align:right!important}
     [data-testid="stRadio"] label{justify-content:center}
-    @media(max-width:640px){.block-container{padding:16px 12px 40px!important}.brand{font-size:38px}.hero h1{font-size:25px}}
+    .st-key-mobile_type_select{display:none}
+    @media(max-width:640px){
+      .block-container{padding:40px 10px 24px!important}
+      .brand{font-size:34px;margin:2px auto}.brand-icon{font-size:32px}
+      .tagline{font-size:14px;margin-bottom:14px}
+      .hero{margin:10px 0 14px}.hero h1{font-size:23px;margin-bottom:4px}
+      div[data-testid="stVerticalBlockBorderWrapper"]{padding:12px;margin:8px auto 12px}
+      .st-key-desktop_type_grid{display:none!important}
+      .st-key-mobile_type_select{display:block!important}
+      .section-title{font-size:17px;margin-bottom:8px}
+    }
     </style>""", unsafe_allow_html=True)
 
 
@@ -210,13 +344,27 @@ def pdf_bytes(image: Image.Image) -> bytes:
 init_state(); rtl()
 st.markdown('<div class="brand"><span class="brand-icon">▦</span><span>QRcraft</span></div><div class="tagline">קוד QR חכם. בדיוק כמו שאתם צריכים.</div>',unsafe_allow_html=True)
 st.markdown('<div class="hero"><h1>מה תרצו ליצור היום?</h1></div>',unsafe_allow_html=True)
-# Two centered rows of six content type choices.
-for row_start in (0,6):
-    cols=st.columns(6,gap="small")
-    for col,kind in zip(cols,CONTENT_TYPES[row_start:row_start+6]):
-        with col:
-            if st.button(kind,key="type_"+kind,use_container_width=True,type="primary" if st.session_state.kind==kind else "secondary"):
-                st.session_state.kind=kind; st.rerun()
+def type_button(col, kind: str, prefix: str) -> None:
+    with col:
+        label,icon=TYPE_BUTTONS[kind]
+        if st.button(label,key=prefix+kind,help=kind,icon=icon,wrap=True,use_container_width=True,type="primary" if st.session_state.kind==kind else "secondary"):
+            st.session_state.kind=kind; st.rerun()
+
+
+# Keep the icon buttons on larger screens and use one compact selector on phones.
+with st.container(key="desktop_type_grid"):
+    for row_start in range(0,len(CONTENT_TYPES),4):
+        cols=st.columns(4,gap="small")
+        for col,kind in zip(cols,CONTENT_TYPES[row_start:row_start+4]):
+            type_button(col,kind,"desktop_type_")
+
+with st.container(key="mobile_type_select"):
+    st.selectbox(
+        "בחירת סוג הקוד",
+        CONTENT_TYPES,
+        key="kind",
+        format_func=lambda kind: f"{TYPE_SELECT_ICONS[kind]}　{kind}",
+    )
 
 st.markdown('<div class="section-title">🔗　תוכן הקוד</div>',unsafe_allow_html=True)
 with st.container(border=True):
@@ -227,14 +375,14 @@ with st.container(border=True):
 
 st.markdown('<div class="section-title">🎨　התאמה אישית</div>',unsafe_allow_html=True)
 with st.container(border=True):
-    c1,c2=st.columns(2)
+    c1,c2=st.columns(2,wrap=False)
     with c1: st.color_picker("צבע הקוד",key="fg")
     with c2: st.color_picker("צבע הרקע",key="bg")
-    st.slider("גודל (פיקסלים)",200,800,key="size",step=20)
-    st.slider("שוליים (פיקסלים)",0,12,key="border")
+    range_slider("גודל (פיקסלים)",200,800,key="size",step=20)
+    range_slider("שוליים (פיקסלים)",0,12,key="border")
     st.selectbox("רמת תיקון שגיאות",list(ERROR_LEVELS),key="ec")
     upload=st.file_uploader("העלאת לוגו",type=["png","jpg","jpeg"],key="logo_upload")
-    st.toggle("לוגו עגול",key="round_logo")
+    logo_toggle("לוגו עגול",key="round_logo")
 
 st.markdown('<div class="section-title">◉　תצוגה מקדימה</div>',unsafe_allow_html=True)
 with st.container(border=True):
@@ -252,7 +400,7 @@ with st.container(border=True):
             history_signature=(payload,st.session_state.kind,st.session_state.size,st.session_state.fg,st.session_state.bg,st.session_state.ec,st.session_state.border,upload.name if upload else None)
             if not st.session_state.history or st.session_state.history[0]["signature"]!=history_signature:
                 st.session_state.history.insert(0,{"signature":history_signature,"kind":st.session_state.kind,"image":png.getvalue(),"created":datetime.now().strftime("%H:%M")}); st.session_state.history=st.session_state.history[:5]
-            d1,d2,d3=st.columns(3)
+            d1,d2,d3=st.columns(3,wrap=False)
             d1.download_button("↓　PNG",png.getvalue(),"qr-code.png","image/png",use_container_width=True)
             d2.download_button("↓　SVG",svg,"qr-code.svg","image/svg+xml",use_container_width=True)
             d3.download_button("↓　PDF",pdf,"qr-code.pdf","application/pdf",use_container_width=True)
